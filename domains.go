@@ -66,6 +66,73 @@ func checkAndMarkDomainVerified(ctx context.Context, store Store, verifier Domai
 	return true, "verified", nil
 }
 
+// DNSRecord is one row of DNS config shown on the Domains page.
+type DNSRecord struct {
+	Purpose string // "Ownership verification", "SPF", "DKIM", "DMARC"
+	Host    string
+	Type    string
+	Value   string
+	Note    string
+}
+
+// BuildDNSRecords returns the set of DNS records the user should publish for a
+// domain. Missing pieces (like an unset DKIM public key) are included with an
+// explanatory note.
+func BuildDNSRecords(d *Domain, serverIP, dmarcReportTo string) []DNSRecord {
+	recs := []DNSRecord{}
+	if d.VerifiedAt == nil {
+		recs = append(recs, DNSRecord{
+			Purpose: "Ownership verification",
+			Host:    "_goemail-challenge." + d.Domain,
+			Type:    "TXT",
+			Value:   d.VerificationToken,
+			Note:    "Publish this TXT, then click Verify.",
+		})
+	}
+	spfValue := "v=spf1 -all"
+	if serverIP != "" {
+		spfValue = "v=spf1 ip4:" + serverIP + " -all"
+	}
+	recs = append(recs, DNSRecord{
+		Purpose: "SPF",
+		Host:    d.Domain,
+		Type:    "TXT",
+		Value:   spfValue,
+		Note:    "Authorizes the go-email server to send on behalf of this domain.",
+	})
+	selector := d.DKIMSelector
+	if selector == "" {
+		selector = "dkim"
+	}
+	dkimValue := d.DKIMPublicKey
+	dkimNote := "Paste the DKIM public key from your SMTP backend (Mailcow → Configuration → Domains → " + d.Domain + " → DKIM key)."
+	if dkimValue == "" {
+		dkimValue = "(not set — add the domain in Mailcow first, then paste its DKIM key below)"
+	} else if !strings.HasPrefix(strings.ToLower(dkimValue), "v=dkim1") {
+		// Allow users to paste just the p= portion; normalise to a full record.
+		dkimValue = "v=DKIM1; k=rsa; p=" + dkimValue
+	}
+	recs = append(recs, DNSRecord{
+		Purpose: "DKIM",
+		Host:    selector + "._domainkey." + d.Domain,
+		Type:    "TXT",
+		Value:   dkimValue,
+		Note:    dkimNote,
+	})
+	reportTo := dmarcReportTo
+	if reportTo == "" {
+		reportTo = "postmaster@" + d.Domain
+	}
+	recs = append(recs, DNSRecord{
+		Purpose: "DMARC",
+		Host:    "_dmarc." + d.Domain,
+		Type:    "TXT",
+		Value:   "v=DMARC1; p=none; rua=mailto:" + reportTo,
+		Note:    "Start with p=none for monitoring; tighten to p=quarantine or p=reject later.",
+	})
+	return recs
+}
+
 // parseFromDomain extracts the domain portion of an email address.
 // Returns "" if the address is malformed.
 func parseFromDomain(email string) string {

@@ -19,6 +19,9 @@ type Server struct {
 	maxBodyKB    int64
 	cookieSecure bool
 	templates    map[string]*template.Template
+	// DNS helpers: used only to render the suggested SPF / DMARC records.
+	serverIP       string
+	dmarcReportTo  string
 }
 
 // Option configures the Server.
@@ -41,6 +44,15 @@ func WithMaxBodyKB(kb int64) Option { return func(srv *Server) { srv.maxBodyKB =
 
 // WithCookieSecure marks session cookies Secure. Enable in prod.
 func WithCookieSecure(secure bool) Option { return func(srv *Server) { srv.cookieSecure = secure } }
+
+// WithServerIP is the public IP of the SMTP relay — used only to render the
+// suggested SPF record on the Domains page.
+func WithServerIP(ip string) Option { return func(srv *Server) { srv.serverIP = ip } }
+
+// WithDMARCReportTo is the mailto: address used in the suggested DMARC record.
+func WithDMARCReportTo(email string) Option {
+	return func(srv *Server) { srv.dmarcReportTo = email }
+}
 
 // New constructs a Server.
 func New(opts ...Option) (*Server, error) {

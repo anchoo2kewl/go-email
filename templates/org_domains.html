@@ -2,57 +2,73 @@
 <section class="page-head">
   <div>
     <h1>Sending domains</h1>
-    <p class="muted">Verify each domain by adding a TXT record. API keys can only send <em>from</em> verified domains.</p>
+    <p class="muted">Each domain needs TXT records for ownership, SPF, DKIM, and DMARC. API keys can only send <em>from</em> verified domains.</p>
   </div>
   {{if or (eq .Role "owner") (eq .Role "admin")}}
   <button class="btn btn-primary" type="button" onclick="document.getElementById('add-domain-form').showModal()">Add domain</button>
   {{end}}
 </section>
 
-<table class="data-table">
-  <thead><tr><th>Domain</th><th>Status</th><th>Verify by adding TXT record</th><th></th></tr></thead>
-  <tbody>
-  {{range .Domains}}
-  <tr>
-    <td><strong>{{.Domain}}</strong></td>
-    <td>
-      {{if .Verified}}<span class="pill pill-active">verified</span>
-      <span class="muted" style="margin-left:8px;font-size:11px">{{.VerifiedDisplay}}</span>
-      {{else}}<span class="pill pill-revoked">pending</span>{{end}}
-    </td>
-    <td>
+{{range .Domains}}
+<article class="domain-card">
+  <header class="domain-head">
+    <div>
+      <h3>{{.Domain}}</h3>
+      {{if .Verified}}<span class="pill pill-active">verified · {{.VerifiedDisplay}}</span>
+      {{else}}<span class="pill pill-revoked">pending verification</span>{{end}}
+    </div>
+    {{if or (eq $.Role "owner") (eq $.Role "admin")}}
+    <div>
       {{if not .Verified}}
-      <div style="font-family:ui-monospace,monospace;font-size:12px">
-        <strong>Host:</strong> <code>{{.ChallengeHost}}</code><br>
-        <strong>Type:</strong> <code>TXT</code><br>
-        <strong>Value:</strong> <code class="new-key">{{.Token}}</code>
-      </div>
-      {{else}}<span class="muted">—</span>{{end}}
-    </td>
-    <td>
-      {{if or (eq $.Role "owner") (eq $.Role "admin")}}
-        {{if not .Verified}}
-        <form method="POST" action="/orgs/{{$.Org.Slug}}/domains/{{.ID}}/verify" style="display:inline">
-          <button class="btn btn-ghost btn-sm" type="submit">Verify</button>
-        </form>
-        {{end}}
-        <form method="POST" action="/orgs/{{$.Org.Slug}}/domains/{{.ID}}/delete" style="display:inline" onsubmit="return confirm('Remove {{.Domain}}?');">
-          <button class="btn btn-ghost btn-sm btn-danger" type="submit">Remove</button>
-        </form>
+      <form method="POST" action="/orgs/{{$.Org.Slug}}/domains/{{.ID}}/verify" style="display:inline">
+        <button class="btn btn-ghost btn-sm" type="submit">Verify</button>
+      </form>
       {{end}}
-    </td>
-  </tr>
-  {{else}}
-  <tr><td colspan="4" class="empty">No domains yet.</td></tr>
+      <form method="POST" action="/orgs/{{$.Org.Slug}}/domains/{{.ID}}/delete" style="display:inline" onsubmit="return confirm('Remove {{.Domain}}?');">
+        <button class="btn btn-ghost btn-sm btn-danger" type="submit">Remove</button>
+      </form>
+    </div>
+    {{end}}
+  </header>
+
+  <table class="dns-table">
+    <thead><tr><th>Record</th><th>Host</th><th>Type</th><th>Value</th></tr></thead>
+    <tbody>
+      {{range .Records}}
+      <tr>
+        <td><strong>{{.Purpose}}</strong><div class="muted" style="font-size:11px;margin-top:2px">{{.Note}}</div></td>
+        <td><code>{{.Host}}</code></td>
+        <td><code>{{.Type}}</code></td>
+        <td><code class="wrap">{{.Value}}</code></td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+
+  {{if or (eq $.Role "owner") (eq $.Role "admin")}}
+  <details class="dkim-edit">
+    <summary>Paste DKIM public key from Mailcow</summary>
+    <form method="POST" action="/orgs/{{$.Org.Slug}}/domains/{{.ID}}/dkim">
+      <label><span>Selector</span>
+        <input type="text" name="selector" value="{{.DKIMSelector}}" placeholder="dkim" required>
+      </label>
+      <label><span>Public key (just the p= value, or full "v=DKIM1; k=rsa; p=...")</span>
+        <textarea name="public_key" rows="3" placeholder="MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA..."></textarea>
+      </label>
+      <button class="btn btn-primary btn-sm" type="submit">Save DKIM key</button>
+    </form>
+  </details>
   {{end}}
-  </tbody>
-</table>
+</article>
+{{else}}
+<p class="empty">No domains yet. Add one to start sending.</p>
+{{end}}
 
 <dialog id="add-domain-form" class="modal">
   <form method="POST" action="/orgs/{{.Org.Slug}}/domains">
     <h2>Add sending domain</h2>
     <label><span>Domain</span><input type="text" name="domain" placeholder="example.com" required></label>
-    <p class="muted" style="font-size:12px">You'll be shown a TXT record to add to prove ownership.</p>
+    <p class="muted" style="font-size:12px">After you add it, you'll see the TXT records to publish.</p>
     <div class="modal-actions">
       <button type="button" class="btn btn-ghost" onclick="this.closest('dialog').close()">Cancel</button>
       <button type="submit" class="btn btn-primary">Add</button>

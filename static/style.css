@@ -131,3 +131,19 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .org-card:hover { text-decoration: none; border-color: var(--accent); }
 .org-card h3 { margin: 0 0 4px; font-size: 17px; }
 .org-card p { margin: 0; font-size: 13px; }
+
+/* Domain cards with DNS record tables */
+.domain-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; }
+.domain-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.domain-head h3 { margin: 0 0 6px; font-size: 17px; }
+.dns-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dns-table th, .dns-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+.dns-table th { background: var(--surface-2); color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+.dns-table code { font-size: 12px; }
+.dns-table code.wrap { word-break: break-all; display: inline-block; max-width: 100%; }
+.dns-table tbody tr:last-child td { border-bottom: none; }
+.dkim-edit { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+.dkim-edit summary { cursor: pointer; color: var(--accent); font-size: 14px; }
+.dkim-edit form { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; max-width: 600px; }
+.dkim-edit textarea { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); padding: 10px 12px; border-radius: var(--radius); font-family: ui-monospace, monospace; font-size: 12px; resize: vertical; }
+.empty { color: var(--muted); text-align: center; padding: 40px; }

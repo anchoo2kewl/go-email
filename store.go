@@ -51,14 +51,23 @@ type OrgMember struct {
 	UserEmail string `json:"-"`
 }
 
-// Domain is a sending domain owned by an organization. Verification is via
-// a TXT record at _goemail-challenge.<domain> containing VerificationToken.
+// Domain is a sending domain owned by an organization.
+//
+// Ownership verification: TXT at _goemail-challenge.<domain> containing
+// VerificationToken.
+//
+// Deliverability: DKIMSelector + DKIMPublicKey are the public half of the
+// DKIM keypair that signs mail for this domain (pasted in after the admin
+// creates the domain in their SMTP backend like Mailcow). SPF + DMARC
+// records are derived at render time from the server IP / admin contact.
 type Domain struct {
 	ID                int64
 	OrgID             int64
 	Domain            string
 	VerificationToken string
 	VerifiedAt        *time.Time
+	DKIMSelector      string // e.g. "dkim" (default for Mailcow)
+	DKIMPublicKey     string // "v=DKIM1; k=rsa; p=..." or just the base64 p= value
 	CreatedAt         time.Time
 }
 
@@ -134,6 +143,7 @@ type Store interface {
 	GetDomainByName(orgID int64, domain string) (*Domain, error)
 	ListDomainsForOrg(orgID int64) ([]Domain, error)
 	MarkDomainVerified(id int64, t time.Time) error
+	UpdateDomainDKIM(id int64, selector, publicKey string) error
 	DeleteDomain(id int64) error
 	FindVerifiedDomain(orgID int64, domain string) (*Domain, error)
 
@@ -217,6 +227,8 @@ func (s *sqliteStore) migrate() error {
 			domain TEXT NOT NULL,
 			verification_token TEXT NOT NULL,
 			verified_at DATETIME,
+			dkim_selector TEXT NOT NULL DEFAULT 'dkim',
+			dkim_public_key TEXT NOT NULL DEFAULT '',
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE (org_id, domain)
 		)`,
@@ -497,20 +509,20 @@ func (s *sqliteStore) CreateDomain(d *Domain) error {
 
 func (s *sqliteStore) GetDomainByID(id int64) (*Domain, error) {
 	return scanDomain(s.db.QueryRow(
-		`SELECT id, org_id, domain, verification_token, verified_at, created_at FROM domains WHERE id=?`, id,
+		`SELECT id, org_id, domain, verification_token, verified_at, dkim_selector, dkim_public_key, created_at FROM domains WHERE id=?`, id,
 	))
 }
 
 func (s *sqliteStore) GetDomainByName(orgID int64, domain string) (*Domain, error) {
 	return scanDomain(s.db.QueryRow(
-		`SELECT id, org_id, domain, verification_token, verified_at, created_at FROM domains WHERE org_id=? AND domain=?`,
+		`SELECT id, org_id, domain, verification_token, verified_at, dkim_selector, dkim_public_key, created_at FROM domains WHERE org_id=? AND domain=?`,
 		orgID, strings.ToLower(domain),
 	))
 }
 
 func (s *sqliteStore) ListDomainsForOrg(orgID int64) ([]Domain, error) {
 	rows, err := s.db.Query(
-		`SELECT id, org_id, domain, verification_token, verified_at, created_at FROM domains WHERE org_id=? ORDER BY domain`,
+		`SELECT id, org_id, domain, verification_token, verified_at, dkim_selector, dkim_public_key, created_at FROM domains WHERE org_id=? ORDER BY domain`,
 		orgID,
 	)
 	if err != nil {
@@ -533,6 +545,14 @@ func (s *sqliteStore) MarkDomainVerified(id int64, t time.Time) error {
 	return err
 }
 
+func (s *sqliteStore) UpdateDomainDKIM(id int64, selector, publicKey string) error {
+	if selector == "" {
+		selector = "dkim"
+	}
+	_, err := s.db.Exec(`UPDATE domains SET dkim_selector=?, dkim_public_key=? WHERE id=?`, selector, publicKey, id)
+	return err
+}
+
 func (s *sqliteStore) DeleteDomain(id int64) error {
 	_, err := s.db.Exec(`DELETE FROM domains WHERE id=?`, id)
 	return err
@@ -540,7 +560,7 @@ func (s *sqliteStore) DeleteDomain(id int64) error {
 
 func (s *sqliteStore) FindVerifiedDomain(orgID int64, domain string) (*Domain, error) {
 	return scanDomain(s.db.QueryRow(
-		`SELECT id, org_id, domain, verification_token, verified_at, created_at
+		`SELECT id, org_id, domain, verification_token, verified_at, dkim_selector, dkim_public_key, created_at
 		 FROM domains WHERE org_id=? AND domain=? AND verified_at IS NOT NULL`,
 		orgID, strings.ToLower(domain),
 	))
@@ -761,7 +781,8 @@ func scanOrg(row rowScanner) (*Organization, error) {
 func scanDomain(row rowScanner) (*Domain, error) {
 	var d Domain
 	var verified sql.NullTime
-	if err := row.Scan(&d.ID, &d.OrgID, &d.Domain, &d.VerificationToken, &verified, &d.CreatedAt); err != nil {
+	if err := row.Scan(&d.ID, &d.OrgID, &d.Domain, &d.VerificationToken, &verified,
+		&d.DKIMSelector, &d.DKIMPublicKey, &d.CreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}

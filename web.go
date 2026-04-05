@@ -58,13 +58,14 @@ type dashboardKey struct {
 }
 
 type domainRow struct {
-	ID               int64
-	Domain           string
-	ChallengeHost    string
-	Token            string
-	Verified         bool
-	VerifiedDisplay  string
-	CreatedDisplay   string
+	ID              int64
+	Domain          string
+	Verified        bool
+	VerifiedDisplay string
+	CreatedDisplay  string
+	DKIMSelector    string
+	DKIMPublicKey   string
+	Records         []DNSRecord
 }
 
 type memberRow struct {
@@ -410,17 +411,19 @@ func (s *Server) handleOrgDomains(w http.ResponseWriter, r *http.Request) {
 	domains, _ := s.store.ListDomainsForOrg(org.ID)
 	rows := make([]domainRow, 0, len(domains))
 	for i := range domains {
+		d := domains[i]
 		verifiedStr := "—"
-		if domains[i].VerifiedAt != nil {
-			verifiedStr = domains[i].VerifiedAt.Format("Jan 2, 2006")
+		if d.VerifiedAt != nil {
+			verifiedStr = d.VerifiedAt.Format("Jan 2, 2006")
 		}
 		rows = append(rows, domainRow{
-			ID: domains[i].ID, Domain: domains[i].Domain,
-			ChallengeHost:   challengeHost(domains[i].Domain),
-			Token:           domains[i].VerificationToken,
-			Verified:        domains[i].VerifiedAt != nil,
+			ID: d.ID, Domain: d.Domain,
+			Verified:        d.VerifiedAt != nil,
 			VerifiedDisplay: verifiedStr,
-			CreatedDisplay:  domains[i].CreatedAt.Format("Jan 2, 2006"),
+			CreatedDisplay:  d.CreatedAt.Format("Jan 2, 2006"),
+			DKIMSelector:    d.DKIMSelector,
+			DKIMPublicKey:   d.DKIMPublicKey,
+			Records:         BuildDNSRecords(&d, s.serverIP, s.dmarcReportTo),
 		})
 	}
 	s.renderPage(w, "org_domains", pageData{
@@ -457,6 +460,11 @@ func (s *Server) handleOrgDomainAction(w http.ResponseWriter, r *http.Request, r
 	switch action {
 	case "verify":
 		_, _, _ = checkAndMarkDomainVerified(r.Context(), s.store, s.verifier, d)
+	case "dkim":
+		_ = r.ParseForm()
+		selector := strings.TrimSpace(r.FormValue("selector"))
+		pub := strings.TrimSpace(r.FormValue("public_key"))
+		_ = s.store.UpdateDomainDKIM(id, selector, pub)
 	case "delete":
 		_ = s.store.DeleteDomain(id)
 	}
