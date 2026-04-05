@@ -105,6 +105,10 @@ func (s *Server) renderPage(w http.ResponseWriter, name string, data pageData) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Dynamic admin pages must never be cached by the browser or an upstream
+	// CDN — otherwise a stale "No organizations yet" etc. sticks around.
+	w.Header().Set("Cache-Control", "no-store, private, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
 	if err := t.ExecuteTemplate(w, "layout", data); err != nil {
 		s.logger.Errorf("render %s: %v", name, err)
 	}
