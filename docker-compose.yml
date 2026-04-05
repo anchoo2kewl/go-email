@@ -8,6 +8,9 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8096:8095"  # host 8096 → container 8095
+    extra_hosts:
+      # Lets the container reach the host's public ports (Mailcow SMTP on :587)
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./data:/data
     environment:
