@@ -11,8 +11,11 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// keyPrefix is the human-readable prefix of every generated API key.
+// keyPrefix is the human-readable prefix of every org-scoped API key.
 const keyPrefix = "gek_"
+
+// serviceKeyPrefix marks platform-level super-admin keys.
+const serviceKeyPrefix = "gsa_"
 
 // generateAPIKey returns a new raw API key of the form "gek_<32 base32 chars>".
 // Only the caller sees the raw value; we store bcrypt(raw) + a short prefix.
@@ -57,6 +60,30 @@ func verifyPassword(password, hash string) error {
 // extractKeyPrefix returns the 12-char prefix we use as a lookup index.
 func extractKeyPrefix(raw string) string {
 	if !strings.HasPrefix(raw, keyPrefix) || len(raw) < 12 {
+		return ""
+	}
+	return raw[:12]
+}
+
+// generateServiceKey returns a new platform admin key "gsa_<32 base32 chars>".
+func generateServiceKey() (raw string, storedPrefix string, hash string, err error) {
+	buf := make([]byte, 20)
+	if _, err := rand.Read(buf); err != nil {
+		return "", "", "", err
+	}
+	body := strings.ToLower(strings.TrimRight(base32.StdEncoding.EncodeToString(buf), "="))
+	raw = serviceKeyPrefix + body
+	storedPrefix = raw[:12]
+	h, err := bcrypt.GenerateFromPassword([]byte(raw), bcrypt.DefaultCost)
+	if err != nil {
+		return "", "", "", err
+	}
+	return raw, storedPrefix, string(h), nil
+}
+
+// extractServicePrefix pulls the 12-char lookup prefix for a gsa_* key.
+func extractServicePrefix(raw string) string {
+	if !strings.HasPrefix(raw, serviceKeyPrefix) || len(raw) < 12 {
 		return ""
 	}
 	return raw[:12]

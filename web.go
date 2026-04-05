@@ -33,10 +33,12 @@ type pageData struct {
 	Keys      []dashboardKey
 	Domains   []domainRow
 	Members   []memberRow
-	AllOrgs   []orgRow
-	ChallHost string // for domain-add page
-	Token     string
-	RecentLog []SendLog
+	AllOrgs       []orgRow
+	ServiceKeys   []serviceKeyRow
+	NewServiceKey string
+	ChallHost     string // for domain-add page
+	Token         string
+	RecentLog     []SendLog
 }
 
 type flashMessage struct {
@@ -85,6 +87,15 @@ type orgRow struct {
 	CreatedDisplay string
 }
 
+type serviceKeyRow struct {
+	ID              int64
+	Label           string
+	KeyPrefix       string
+	Status          string
+	CreatedDisplay  string
+	LastUsedDisplay string
+}
+
 func (s *Server) initTemplates() error {
 	tmpl := template.New("")
 	pages := []string{"landing", "login", "orgs", "org_overview", "org_keys", "org_domains", "org_members", "admin"}
@@ -127,6 +138,8 @@ func (s *Server) webHandler() http.Handler {
 
 	mux.HandleFunc("/admin", s.requireLoginHTML(s.requireSuperAdmin(s.handleAdminPage)))
 	mux.HandleFunc("/admin/orgs", s.requireLoginHTML(s.requireSuperAdmin(s.handleAdminCreateOrg)))
+	mux.HandleFunc("/admin/service-keys", s.requireLoginHTML(s.requireSuperAdmin(s.handleAdminServiceKeys)))
+	mux.HandleFunc("/admin/service-keys/", s.requireLoginHTML(s.requireSuperAdmin(s.handleAdminServiceKeyAction)))
 
 	subFS, _ := fs.Sub(staticFS, "static")
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(subFS))))
@@ -581,7 +594,81 @@ func (s *Server) handleAdminPage(w http.ResponseWriter, r *http.Request) {
 			CreatedDisplay: orgs[i].CreatedAt.Format("Jan 2, 2006"),
 		})
 	}
-	s.renderPage(w, "admin", pageData{Title: "Admin", User: u, AllOrgs: rows})
+	svc, _ := s.store.ListServiceAPIKeys()
+	svcRows := make([]serviceKeyRow, 0, len(svc))
+	for i := range svc {
+		last := "—"
+		if svc[i].LastUsedAt != nil {
+			last = svc[i].LastUsedAt.Format("Jan 2, 15:04 UTC")
+		}
+		svcRows = append(svcRows, serviceKeyRow{
+			ID: svc[i].ID, Label: svc[i].Label, KeyPrefix: svc[i].KeyPrefix, Status: svc[i].Status,
+			CreatedDisplay: svc[i].CreatedAt.Format("Jan 2, 2006"), LastUsedDisplay: last,
+		})
+	}
+	s.renderPage(w, "admin", pageData{
+		Title: "Admin", User: u, AllOrgs: rows,
+		ServiceKeys: svcRows, NewServiceKey: r.URL.Query().Get("svckey"),
+	})
+}
+
+// POST /admin/service-keys — create a new platform admin API key
+func (s *Server) handleAdminServiceKeys(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	u := userFromCtx(r)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	label := strings.TrimSpace(r.FormValue("label"))
+	if label == "" {
+		http.Redirect(w, r, "/admin", http.StatusFound)
+		return
+	}
+	raw, prefix, hash, err := generateServiceKey()
+	if err != nil {
+		http.Error(w, "failed to generate key", http.StatusInternalServerError)
+		return
+	}
+	if err := s.store.CreateServiceAPIKey(&ServiceAPIKey{
+		Label: label, KeyPrefix: prefix, KeyHash: hash,
+		CreatedByUserID: u.ID, Status: "active",
+	}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/admin?svckey="+raw, http.StatusFound)
+}
+
+// POST /admin/service-keys/{id}/revoke
+func (s *Server) handleAdminServiceKeyAction(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	rest := strings.TrimPrefix(r.URL.Path, "/admin/service-keys/")
+	parts := strings.Split(rest, "/")
+	if len(parts) < 2 || parts[1] != "revoke" {
+		http.NotFound(w, r)
+		return
+	}
+	id, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		http.Error(w, "bad id", http.StatusBadRequest)
+		return
+	}
+	keys, _ := s.store.ListServiceAPIKeys()
+	for i := range keys {
+		if keys[i].ID == id {
+			keys[i].Status = "revoked"
+			_ = s.store.UpdateServiceAPIKey(&keys[i])
+			break
+		}
+	}
+	http.Redirect(w, r, "/admin", http.StatusFound)
 }
 
 func (s *Server) handleAdminCreateOrg(w http.ResponseWriter, r *http.Request) {

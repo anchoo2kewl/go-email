@@ -25,6 +25,57 @@
   </tbody>
 </table>
 
+<section class="page-head" style="margin-top:40px">
+  <div>
+    <h1>Service API keys</h1>
+    <p class="muted">Platform-level admin credentials (gsa_*) for managing orgs / domains / keys across all tenants via <code>POST /admin/v1/*</code>. Distinct from per-org send keys.</p>
+  </div>
+  <button class="btn btn-primary" type="button" onclick="document.getElementById('new-svc-key-form').showModal()">New service key</button>
+</section>
+
+{{if .NewServiceKey}}
+<div class="flash success">
+  <strong>Copy this service key now — it won't be shown again:</strong>
+  <code class="new-key">{{.NewServiceKey}}</code>
+</div>
+{{end}}
+
+<table class="data-table">
+  <thead><tr><th>Label</th><th>Prefix</th><th>Status</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+  <tbody>
+  {{range .ServiceKeys}}
+  <tr>
+    <td>{{.Label}}</td>
+    <td><code>{{.KeyPrefix}}…</code></td>
+    <td><span class="pill pill-{{.Status}}">{{.Status}}</span></td>
+    <td class="muted">{{.CreatedDisplay}}</td>
+    <td class="muted">{{.LastUsedDisplay}}</td>
+    <td>
+      {{if eq .Status "active"}}
+      <form method="POST" action="/admin/service-keys/{{.ID}}/revoke" onsubmit="return confirm('Revoke this service key?');">
+        <button class="btn btn-ghost btn-sm" type="submit">Revoke</button>
+      </form>
+      {{end}}
+    </td>
+  </tr>
+  {{else}}
+  <tr><td colspan="6" class="empty">No service keys yet.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+
+<dialog id="new-svc-key-form" class="modal">
+  <form method="POST" action="/admin/service-keys">
+    <h2>New service API key</h2>
+    <label><span>Label</span><input type="text" name="label" placeholder="e.g. terraform-provisioning" required></label>
+    <p class="muted" style="font-size:12px">This key can manage every org on this instance via <code>/admin/v1/*</code>. Guard it carefully.</p>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" onclick="this.closest('dialog').close()">Cancel</button>
+      <button type="submit" class="btn btn-primary">Create key</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="new-org-form" class="modal">
   <form method="POST" action="/admin/orgs">
     <h2>New organization</h2>

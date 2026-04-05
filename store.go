@@ -99,6 +99,20 @@ type SendLog struct {
 	SentAt    time.Time
 }
 
+// ServiceAPIKey is a platform-level credential for automating org/domain/key
+// management across ALL tenants. Distinct from org APIKey (which only sends
+// email). Only super-admins can create these.
+type ServiceAPIKey struct {
+	ID              int64
+	Label           string
+	KeyPrefix       string
+	KeyHash         string
+	CreatedByUserID int64
+	Status          string
+	CreatedAt       time.Time
+	LastUsedAt      *time.Time
+}
+
 // Session is a browser login session.
 type Session struct {
 	ID        string
@@ -161,6 +175,13 @@ type Store interface {
 	CountSendsSince(apiKeyID int64, since time.Time) (int, error)
 	ListRecentSendsForKey(apiKeyID int64, limit int) ([]SendLog, error)
 	ListRecentSendsForOrg(orgID int64, limit int) ([]SendLog, error)
+
+	// Service API keys (super-admin scoped)
+	CreateServiceAPIKey(k *ServiceAPIKey) error
+	GetServiceAPIKeyByPrefix(prefix string) (*ServiceAPIKey, error)
+	ListServiceAPIKeys() ([]ServiceAPIKey, error)
+	UpdateServiceAPIKey(k *ServiceAPIKey) error
+	TouchServiceAPIKey(id int64, t time.Time) error
 
 	// Sessions
 	CreateSession(s *Session) error
@@ -267,6 +288,16 @@ func (s *sqliteStore) migrate() error {
 			expires_at DATETIME NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`,
+		`CREATE TABLE IF NOT EXISTS service_api_keys (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			label TEXT NOT NULL,
+			key_prefix TEXT NOT NULL UNIQUE,
+			key_hash TEXT NOT NULL,
+			created_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE SET NULL,
+			status TEXT NOT NULL DEFAULT 'active',
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			last_used_at DATETIME
+		)`,
 	}
 	for _, q := range stmts {
 		if _, err := s.db.Exec(q); err != nil {
@@ -714,6 +745,61 @@ func (s *sqliteStore) queryLogs(query string, args ...any) ([]SendLog, error) {
 	return out, rows.Err()
 }
 
+// --- Service API keys ---
+
+func (s *sqliteStore) CreateServiceAPIKey(k *ServiceAPIKey) error {
+	if k.Status == "" {
+		k.Status = "active"
+	}
+	res, err := s.db.Exec(
+		`INSERT INTO service_api_keys (label, key_prefix, key_hash, created_by_user_id, status)
+		 VALUES (?, ?, ?, ?, ?)`,
+		k.Label, k.KeyPrefix, k.KeyHash, k.CreatedByUserID, k.Status,
+	)
+	if err != nil {
+		return err
+	}
+	k.ID, _ = res.LastInsertId()
+	return nil
+}
+
+func (s *sqliteStore) GetServiceAPIKeyByPrefix(prefix string) (*ServiceAPIKey, error) {
+	return scanServiceAPIKey(s.db.QueryRow(
+		`SELECT id, label, key_prefix, key_hash, created_by_user_id, status, created_at, last_used_at
+		 FROM service_api_keys WHERE key_prefix=?`, prefix,
+	))
+}
+
+func (s *sqliteStore) ListServiceAPIKeys() ([]ServiceAPIKey, error) {
+	rows, err := s.db.Query(
+		`SELECT id, label, key_prefix, key_hash, created_by_user_id, status, created_at, last_used_at
+		 FROM service_api_keys ORDER BY id`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ServiceAPIKey
+	for rows.Next() {
+		k, err := scanServiceAPIKey(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *k)
+	}
+	return out, rows.Err()
+}
+
+func (s *sqliteStore) UpdateServiceAPIKey(k *ServiceAPIKey) error {
+	_, err := s.db.Exec(`UPDATE service_api_keys SET label=?, status=? WHERE id=?`, k.Label, k.Status, k.ID)
+	return err
+}
+
+func (s *sqliteStore) TouchServiceAPIKey(id int64, t time.Time) error {
+	_, err := s.db.Exec(`UPDATE service_api_keys SET last_used_at=? WHERE id=?`, t, id)
+	return err
+}
+
 // --- Sessions ---
 
 func (s *sqliteStore) CreateSession(sess *Session) error {
@@ -792,6 +878,22 @@ func scanDomain(row rowScanner) (*Domain, error) {
 		d.VerifiedAt = &verified.Time
 	}
 	return &d, nil
+}
+
+func scanServiceAPIKey(row rowScanner) (*ServiceAPIKey, error) {
+	var k ServiceAPIKey
+	var lastUsed sql.NullTime
+	if err := row.Scan(&k.ID, &k.Label, &k.KeyPrefix, &k.KeyHash, &k.CreatedByUserID,
+		&k.Status, &k.CreatedAt, &lastUsed); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if lastUsed.Valid {
+		k.LastUsedAt = &lastUsed.Time
+	}
+	return &k, nil
 }
 
 func scanAPIKey(row rowScanner) (*APIKey, error) {

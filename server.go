@@ -85,6 +85,8 @@ func (s *Server) Handler() http.Handler {
 	// Machine endpoints
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/v1/emails", s.handleSend)
+	// Service-admin JSON API (gsa_* Bearer auth)
+	mux.Handle("/admin/v1/", s.adminAPIHandler())
 	// HTML UI (session-cookie auth)
 	mux.Handle("/", s.webHandler())
 	return mux
