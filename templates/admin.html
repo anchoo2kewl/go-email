@@ -1,0 +1,84 @@
+{{define "content"}}
+<section class="page-head">
+  <div>
+    <h1>Members</h1>
+    <p class="muted">{{len .Users}} total</p>
+  </div>
+  <button class="btn btn-primary" type="button" onclick="document.getElementById('new-user-form').showModal()">Add member</button>
+</section>
+
+<table class="data-table">
+  <thead><tr><th>Email</th><th>Role</th><th>Daily limit</th><th>Monthly limit</th><th>Created</th><th></th></tr></thead>
+  <tbody>
+  {{range .Users}}
+    <tr>
+      <td>{{.Email}}</td>
+      <td><span class="pill pill-{{.Role}}">{{.Role}}</span></td>
+      <td>{{.DefaultDailyLimit}}</td>
+      <td>{{.DefaultMonthlyLimit}}</td>
+      <td class="muted">{{.CreatedDisplay}}</td>
+      <td>
+        <button class="btn btn-ghost btn-sm" type="button" onclick="editUser({{.ID}}, '{{.Email}}', '{{.Role}}', {{.DefaultDailyLimit}}, {{.DefaultMonthlyLimit}})">Edit</button>
+        {{if ne .ID $.User.ID}}
+        <form method="POST" action="/admin/users/{{.ID}}/delete" style="display:inline" onsubmit="return confirm('Delete {{.Email}}? This removes their keys too.');">
+          <button class="btn btn-ghost btn-sm btn-danger" type="submit">Delete</button>
+        </form>
+        {{end}}
+      </td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+
+<dialog id="new-user-form" class="modal">
+  <form method="POST" action="/admin/users">
+    <h2>Add member</h2>
+    <label><span>Email</span><input type="email" name="email" required></label>
+    <label><span>Temporary password</span><input type="text" name="password" placeholder="At least 8 chars" minlength="8" required></label>
+    <label><span>Role</span>
+      <select name="role">
+        <option value="member">Member</option>
+        <option value="admin">Admin</option>
+      </select>
+    </label>
+    <label><span>Daily limit</span><input type="number" name="default_daily_limit" value="100" min="1" required></label>
+    <label><span>Monthly limit</span><input type="number" name="default_monthly_limit" value="1000" min="1" required></label>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" onclick="this.closest('dialog').close()">Cancel</button>
+      <button type="submit" class="btn btn-primary">Create</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="edit-user-form" class="modal">
+  <form method="POST" id="edit-form">
+    <h2>Edit member</h2>
+    <label><span>Email (readonly)</span><input type="email" id="edit-email" readonly></label>
+    <label><span>New password (leave blank to keep)</span><input type="text" name="password" minlength="8"></label>
+    <label><span>Role</span>
+      <select name="role" id="edit-role">
+        <option value="member">Member</option>
+        <option value="admin">Admin</option>
+      </select>
+    </label>
+    <label><span>Daily limit</span><input type="number" name="default_daily_limit" id="edit-daily" min="1" required></label>
+    <label><span>Monthly limit</span><input type="number" name="default_monthly_limit" id="edit-monthly" min="1" required></label>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" onclick="this.closest('dialog').close()">Cancel</button>
+      <button type="submit" class="btn btn-primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+function editUser(id, email, role, daily, monthly) {
+  const f = document.getElementById('edit-form');
+  f.action = '/admin/users/' + id;
+  document.getElementById('edit-email').value = email;
+  document.getElementById('edit-role').value = role;
+  document.getElementById('edit-daily').value = daily;
+  document.getElementById('edit-monthly').value = monthly;
+  document.getElementById('edit-user-form').showModal();
+}
+</script>
+{{end}}

@@ -1,0 +1,40 @@
+{{define "content"}}
+<section class="hero">
+  <h1>Send transactional email through your own SMTP server.</h1>
+  <p class="lead">
+    go-email is a self-hosted HTTP gateway that relays messages through
+    whatever SMTP relay you already run (Mailcow, Postfix, etc.). Users, API
+    keys, and per-key send limits are stored in a single SQLite database.
+  </p>
+  {{if .User}}
+    <a class="btn btn-primary" href="/dashboard">Go to dashboard</a>
+  {{else}}
+    <a class="btn btn-primary" href="/login">Log in</a>
+  {{end}}
+</section>
+
+<section class="features">
+  <div class="feature">
+    <h3>Multi-tenant</h3>
+    <p>Admins create members; each member manages their own API keys with daily + monthly limits.</p>
+  </div>
+  <div class="feature">
+    <h3>Rate-limited</h3>
+    <p>Limits are enforced at send time. Every attempt — success or failure — is recorded for audit.</p>
+  </div>
+  <div class="feature">
+    <h3>Simple API</h3>
+    <p><code>POST /v1/emails</code> with a Bearer token, JSON body with from/to/subject/html/text. That's it.</p>
+  </div>
+</section>
+
+<section class="quickstart">
+  <h2>Quick start</h2>
+  <pre><code>curl -H "Authorization: Bearer gek_..." \
+  -H "Content-Type: application/json" \
+  -d '{"from":{"email":"alerts@example.com"},
+       "to":[{"email":"user@example.com"}],
+       "subject":"Hi","text":"Hello"}' \
+  https://{{.Host}}/v1/emails</code></pre>
+</section>
+{{end}}

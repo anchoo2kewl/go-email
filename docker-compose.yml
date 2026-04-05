@@ -1,0 +1,23 @@
+services:
+  emaild:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/anchoo2kewl/go-email:latest
+    container_name: emaild
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8096:8095"  # host 8096 → container 8095
+    volumes:
+      - ./data:/data
+    environment:
+      PORT: "8095"
+      DB_PATH: "/data/emaild.db"
+      SMTP_HOST: "${SMTP_HOST:?SMTP_HOST is required}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USERNAME: "${SMTP_USERNAME:?SMTP_USERNAME is required}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:?SMTP_PASSWORD is required}"
+      SMTP_SKIP_VERIFY: "${SMTP_SKIP_VERIFY:-false}"
+      ADMIN_EMAIL: "${ADMIN_EMAIL:-anshuman@biswas.me}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
+      COOKIE_SECURE: "true"

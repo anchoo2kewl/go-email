@@ -1,0 +1,32 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{.Title}} · go-email</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="/">go-email</a>
+  <nav>
+    {{if .User}}
+      <a href="/dashboard">Dashboard</a>
+      {{if eq .User.Role "admin"}}<a href="/admin">Admin</a>{{end}}
+      <span class="user">{{.User.Email}}</span>
+      <form method="POST" action="/logout" style="display:inline"><button class="linklike" type="submit">Log out</button></form>
+    {{else}}
+      <a href="/login">Log in</a>
+    {{end}}
+  </nav>
+</header>
+<main class="container">
+  {{if .Flash}}<div class="flash {{.Flash.Kind}}">{{.Flash.Message}}</div>{{end}}
+  {{template "content" .}}
+</main>
+<footer class="site-footer">
+  <span>self-hosted email gateway</span>
+  <span>· <a href="https://github.com/anchoo2kewl/go-email">source</a></span>
+</footer>
+</body>
+</html>{{end}}
