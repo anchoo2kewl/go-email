@@ -1,0 +1,25 @@
+{{define "content"}}
+<section class="page-head">
+  <div>
+    <h1>{{.Org.Name}}</h1>
+    <p class="muted">Recent email activity for this organization.</p>
+  </div>
+</section>
+
+<table class="data-table">
+  <thead><tr><th>When</th><th>From</th><th>To</th><th>Subject</th><th>Status</th></tr></thead>
+  <tbody>
+  {{range .RecentLog}}
+  <tr>
+    <td class="muted">{{.SentAt.Format "Jan 2 15:04 UTC"}}</td>
+    <td>{{.FromEmail}}</td>
+    <td>{{.ToEmail}}</td>
+    <td>{{.Subject}}</td>
+    <td><span class="pill pill-{{.Status}}">{{.Status}}</span></td>
+  </tr>
+  {{else}}
+  <tr><td colspan="5" class="empty">No sends yet. Create an API key and fire off a test.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}

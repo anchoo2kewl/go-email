@@ -1,0 +1,24 @@
+{{define "content"}}
+<section class="page-head">
+  <div>
+    <h1>Organizations</h1>
+    <p class="muted">Pick an org to manage its API keys, domains, and members.</p>
+  </div>
+</section>
+
+{{if .Orgs}}
+<div class="org-grid">
+  {{range .Orgs}}
+  <a class="org-card" href="/orgs/{{.Slug}}">
+    <h3>{{.Name}}</h3>
+    <p class="muted">{{.Slug}}</p>
+    <p class="muted" style="font-size:12px;margin-top:12px">defaults: {{.DefaultDailyLimit}}/day · {{.DefaultMonthlyLimit}}/month</p>
+  </a>
+  {{end}}
+</div>
+{{else}}
+<p class="muted">You're not a member of any organization yet.
+{{if .User.IsSuperAdmin}}<a href="/admin">Create one &rarr;</a>{{end}}
+</p>
+{{end}}
+{{end}}

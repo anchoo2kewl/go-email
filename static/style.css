@@ -114,3 +114,20 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .modal h2 { margin: 0 0 16px; font-size: 18px; }
 .modal form { display: flex; flex-direction: column; gap: 12px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+
+/* Org bar + grid */
+.org-bar {
+  display: flex; align-items: center; gap: 16px; padding: 12px 32px;
+  background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 14px;
+}
+.org-bar strong { color: var(--text); }
+.org-bar a { color: var(--muted); }
+.org-bar a:hover { color: var(--text); text-decoration: none; }
+.org-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin-top: 24px; }
+.org-card {
+  display: block; background: var(--surface); padding: 20px;
+  border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);
+}
+.org-card:hover { text-decoration: none; border-color: var(--accent); }
+.org-card h3 { margin: 0 0 4px; font-size: 17px; }
+.org-card p { margin: 0; font-size: 13px; }

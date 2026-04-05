@@ -1,0 +1,50 @@
+{{define "content"}}
+<section class="page-head">
+  <div>
+    <h1>Members</h1>
+    <p class="muted">People with access to this organization.</p>
+  </div>
+  {{if or (eq .Role "owner") (eq .Role "admin")}}
+  <button class="btn btn-primary" type="button" onclick="document.getElementById('add-member-form').showModal()">Add member</button>
+  {{end}}
+</section>
+
+<table class="data-table">
+  <thead><tr><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead>
+  <tbody>
+  {{range .Members}}
+  <tr>
+    <td>{{.Email}}</td>
+    <td><span class="pill pill-{{.Role}}">{{.Role}}</span></td>
+    <td class="muted">{{.CreatedDisplay}}</td>
+    <td>
+      {{if and (ne .UserID $.User.ID) (or (eq $.Role "owner") (eq $.Role "admin"))}}
+      <form method="POST" action="/orgs/{{$.Org.Slug}}/members/{{.UserID}}/remove" style="display:inline" onsubmit="return confirm('Remove {{.Email}} from this org?');">
+        <button class="btn btn-ghost btn-sm btn-danger" type="submit">Remove</button>
+      </form>
+      {{end}}
+    </td>
+  </tr>
+  {{end}}
+  </tbody>
+</table>
+
+<dialog id="add-member-form" class="modal">
+  <form method="POST" action="/orgs/{{.Org.Slug}}/members">
+    <h2>Add member</h2>
+    <label><span>Email</span><input type="email" name="email" required></label>
+    <label><span>Password (only needed if creating the user)</span><input type="text" name="password" minlength="8"></label>
+    <label><span>Role</span>
+      <select name="role">
+        <option value="member">Member</option>
+        <option value="admin">Admin</option>
+        {{if eq .Role "owner"}}<option value="owner">Owner</option>{{end}}
+      </select>
+    </label>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" onclick="this.closest('dialog').close()">Cancel</button>
+      <button type="submit" class="btn btn-primary">Add</button>
+    </div>
+  </form>
+</dialog>
+{{end}}

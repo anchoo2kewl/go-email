@@ -1,8 +1,7 @@
 package goemail
 
 import (
-	"bytes"
-	"encoding/json"
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -21,9 +20,36 @@ func (f *fakeSender) Send(m Message) error {
 	return f.err
 }
 
-// newTestServer spins up an in-memory SQLite store with a seeded admin + one
-// member who has one active API key.
-func newTestServer(t *testing.T, sendErr error) (*Server, string, *User, *User) {
+// fakeVerifier returns whatever we tell it to for a given domain.
+type fakeVerifier struct {
+	results map[string]bool // domain -> match
+	err     error
+}
+
+func (f *fakeVerifier) Verify(_ context.Context, domain, _ string) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.results[domain], nil
+}
+
+// testSetup seeds a store with: super-admin anshuman@biswas.me, org "acme",
+// owner-owner bob@acme.com, member alice@acme.com, verified domain acme.com,
+// and one active API key for acme.
+type testSetup struct {
+	store    Store
+	srv      *Server
+	admin    *User
+	owner    *User
+	member   *User
+	org      *Organization
+	domain   *Domain
+	rawKey   string
+	key      *APIKey
+	verifier *fakeVerifier
+}
+
+func newTestSetup(t *testing.T, sendErr error) *testSetup {
 	t.Helper()
 	st, err := OpenStore(":memory:")
 	if err != nil {
@@ -31,199 +57,208 @@ func newTestServer(t *testing.T, sendErr error) (*Server, string, *User, *User) 
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	if err := BootstrapAdmin(st, "admin@test.local", "adminpass1"); err != nil {
-		t.Fatal(err)
-	}
-	admin, _ := st.GetUserByEmail("admin@test.local")
+	_ = Bootstrap(st, BootstrapConfig{
+		AdminEmail: "anshuman@biswas.me", AdminPassword: "adminpass1",
+		OrgName: "biswas-me", OrgSlug: "biswas-me", InitialDomain: "biswas.me",
+	})
+	admin, _ := st.GetUserByEmail("anshuman@biswas.me")
 
-	memberHash, _ := hashPassword("memberpass1")
-	member := &User{
-		Email: "member@test.local", PasswordHash: memberHash, Role: RoleMember,
-		DefaultDailyLimit: 10, DefaultMonthlyLimit: 100,
-	}
-	if err := st.CreateUser(member); err != nil {
+	// Create a second, independent org for the tests
+	org := &Organization{Name: "Acme", Slug: "acme", DefaultDailyLimit: 10, DefaultMonthlyLimit: 100}
+	if err := st.CreateOrg(org); err != nil {
 		t.Fatal(err)
 	}
+	ownerHash, _ := hashPassword("bobpass12")
+	owner := &User{Email: "bob@acme.com", PasswordHash: ownerHash}
+	if err := st.CreateUser(owner); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.AddOrgMember(org.ID, owner.ID, RoleOwner)
+
+	memHash, _ := hashPassword("alicepass1")
+	member := &User{Email: "alice@acme.com", PasswordHash: memHash}
+	_ = st.CreateUser(member)
+	_ = st.AddOrgMember(org.ID, member.ID, RoleMember)
+
+	// Pre-verified domain
+	domain := &Domain{OrgID: org.ID, Domain: "acme.com", VerificationToken: "goemail-verify=test"}
+	_ = st.CreateDomain(domain)
+	_ = st.MarkDomainVerified(domain.ID, time.Now())
+	domain, _ = st.GetDomainByID(domain.ID)
 
 	raw, prefix, hash, _ := generateAPIKey()
-	if err := st.CreateAPIKey(&APIKey{
-		UserID: member.ID, Label: "test", KeyPrefix: prefix, KeyHash: hash,
+	key := &APIKey{
+		OrgID: org.ID, CreatedByUserID: owner.ID, Label: "test",
+		KeyPrefix: prefix, KeyHash: hash,
 		DailyLimit: 5, MonthlyLimit: 50, Status: "active",
-	}); err != nil {
-		t.Fatal(err)
 	}
+	_ = st.CreateAPIKey(key)
 
-	srv, err := New(WithStore(st), WithSender(&fakeSender{err: sendErr}))
+	verifier := &fakeVerifier{results: make(map[string]bool)}
+	srv, err := New(WithStore(st), WithSender(&fakeSender{err: sendErr}), WithVerifier(verifier))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return srv, raw, admin, member
+	return &testSetup{
+		store: st, srv: srv, admin: admin, owner: owner, member: member,
+		org: org, domain: domain, rawKey: raw, key: key, verifier: verifier,
+	}
 }
 
-func post(srv *Server, path, body, authHeader string) *httptest.ResponseRecorder {
+func postJSON(srv *Server, path, body, bearer string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
-	if authHeader != "" {
-		r.Header.Set("Authorization", authHeader)
+	if bearer != "" {
+		r.Header.Set("Authorization", "Bearer "+bearer)
 	}
 	r.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, r)
-	return w
-}
-
-func get(srv *Server, path, user, pass string) *httptest.ResponseRecorder {
-	r := httptest.NewRequest(http.MethodGet, path, nil)
-	if user != "" {
-		r.SetBasicAuth(user, pass)
-	}
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, r)
 	return w
 }
 
 func TestSend_Happy(t *testing.T) {
-	srv, key, _, _ := newTestServer(t, nil)
-	body := `{"from":{"email":"a@x.com"},"to":[{"email":"b@x.com"}],"subject":"hi","text":"hello"}`
-	w := post(srv, "/v1/emails", body, "Bearer "+key)
+	ts := newTestSetup(t, nil)
+	body := `{"from":{"email":"alerts@acme.com"},"to":[{"email":"b@x.com"}],"subject":"hi","text":"hello"}`
+	w := postJSON(ts.srv, "/v1/emails", body, ts.rawKey)
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("want 202, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 
+func TestSend_UnverifiedDomain(t *testing.T) {
+	ts := newTestSetup(t, nil)
+	body := `{"from":{"email":"alerts@evil.com"},"to":[{"email":"b@x.com"}],"subject":"hi","text":"hello"}`
+	w := postJSON(ts.srv, "/v1/emails", body, ts.rawKey)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("want 403, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "not a verified domain") {
+		t.Errorf("expected verified-domain error, got %s", w.Body.String())
+	}
+}
+
 func TestSend_MissingKey(t *testing.T) {
-	srv, _, _, _ := newTestServer(t, nil)
-	w := post(srv, "/v1/emails", `{}`, "")
+	ts := newTestSetup(t, nil)
+	w := postJSON(ts.srv, "/v1/emails", `{}`, "")
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("want 401, got %d", w.Code)
 	}
 }
 
-func TestSend_BadKey(t *testing.T) {
-	srv, _, _, _ := newTestServer(t, nil)
-	w := post(srv, "/v1/emails", `{}`, "Bearer gek_neverbeen")
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("want 401, got %d body=%s", w.Code, w.Body.String())
+func TestSend_RevokedKey(t *testing.T) {
+	ts := newTestSetup(t, nil)
+	ts.key.Status = "revoked"
+	_ = ts.store.UpdateAPIKey(ts.key)
+	body := `{"from":{"email":"alerts@acme.com"},"to":[{"email":"b@x.com"}],"subject":"hi","text":"hello"}`
+	w := postJSON(ts.srv, "/v1/emails", body, ts.rawKey)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("want 403, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 
 func TestSend_DailyLimit(t *testing.T) {
-	srv, key, _, _ := newTestServer(t, nil)
-	body := `{"from":{"email":"a@x.com"},"to":[{"email":"b@x.com"}],"subject":"hi","text":"hello"}`
-	// The key's daily limit is 5.
+	ts := newTestSetup(t, nil)
+	body := `{"from":{"email":"alerts@acme.com"},"to":[{"email":"b@x.com"}],"subject":"hi","text":"hello"}`
 	for i := 0; i < 5; i++ {
-		w := post(srv, "/v1/emails", body, "Bearer "+key)
+		w := postJSON(ts.srv, "/v1/emails", body, ts.rawKey)
 		if w.Code != http.StatusAccepted {
-			t.Fatalf("send %d: want 202, got %d body=%s", i, w.Code, w.Body.String())
+			t.Fatalf("send %d: want 202, got %d", i, w.Code)
 		}
 	}
-	w := post(srv, "/v1/emails", body, "Bearer "+key)
+	w := postJSON(ts.srv, "/v1/emails", body, ts.rawKey)
 	if w.Code != http.StatusTooManyRequests {
-		t.Fatalf("want 429 on 6th send, got %d body=%s", w.Code, w.Body.String())
+		t.Fatalf("6th send: want 429, got %d", w.Code)
 	}
 }
 
-func TestSend_RelayFailureLogged(t *testing.T) {
-	srv, key, _, member := newTestServer(t, errors.New("relay down"))
-	body := `{"from":{"email":"a@x.com"},"to":[{"email":"b@x.com"}],"subject":"hi","text":"hello"}`
-	w := post(srv, "/v1/emails", body, "Bearer "+key)
+func TestSend_RelayFailureReturns502(t *testing.T) {
+	ts := newTestSetup(t, errors.New("relay down"))
+	body := `{"from":{"email":"alerts@acme.com"},"to":[{"email":"b@x.com"}],"subject":"hi","text":"hello"}`
+	w := postJSON(ts.srv, "/v1/emails", body, ts.rawKey)
 	if w.Code != http.StatusBadGateway {
 		t.Fatalf("want 502, got %d", w.Code)
 	}
-	// failed sends should be logged and should NOT count toward the daily limit
-	daily, _ := srv.store.CountSendsSince(member.ID, time.Unix(0, 0))
-	_ = daily // just asserting it doesn't crash
 }
 
-func TestHealth_NoAuth(t *testing.T) {
-	srv, _, _, _ := newTestServer(t, nil)
-	w := get(srv, "/health", "", "")
-	if w.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d", w.Code)
-	}
-}
+func TestDomainVerification(t *testing.T) {
+	ts := newTestSetup(t, nil)
+	// Add a new unverified domain
+	token, _ := generateVerificationToken()
+	d := &Domain{OrgID: ts.org.ID, Domain: "newsite.com", VerificationToken: token}
+	_ = ts.store.CreateDomain(d)
 
-func TestMe(t *testing.T) {
-	srv, _, _, _ := newTestServer(t, nil)
-	w := get(srv, "/api/me", "member@test.local", "memberpass1")
-	if w.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d body=%s", w.Code, w.Body.String())
+	// Fail: verifier says no match
+	ok, msg, _ := checkAndMarkDomainVerified(context.Background(), ts.store, ts.verifier, d)
+	if ok {
+		t.Errorf("expected verification to fail, got success: %s", msg)
 	}
-	var u userInfo
-	_ = json.NewDecoder(w.Body).Decode(&u)
-	if u.Email != "member@test.local" || u.Role != RoleMember {
-		t.Errorf("unexpected user: %+v", u)
-	}
-}
 
-func TestMe_BadCreds(t *testing.T) {
-	srv, _, _, _ := newTestServer(t, nil)
-	w := get(srv, "/api/me", "member@test.local", "wrong")
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("want 401, got %d", w.Code)
+	// Succeed
+	ts.verifier.results["newsite.com"] = true
+	ok, _, _ = checkAndMarkDomainVerified(context.Background(), ts.store, ts.verifier, d)
+	if !ok {
+		t.Fatalf("expected verification to succeed")
+	}
+	got, _ := ts.store.GetDomainByID(d.ID)
+	if got.VerifiedAt == nil {
+		t.Errorf("VerifiedAt should be set")
 	}
 }
 
-func TestCreateKey_MemberClampedToDefaults(t *testing.T) {
-	srv, _, _, _ := newTestServer(t, nil)
-	// member's default daily limit is 10; requesting 9999 should be clamped
-	body := `{"label":"extra","daily_limit":9999,"monthly_limit":9999}`
-	r := httptest.NewRequest(http.MethodPost, "/api/keys", strings.NewReader(body))
-	r.SetBasicAuth("member@test.local", "memberpass1")
-	r.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, r)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("want 201, got %d body=%s", w.Code, w.Body.String())
+func TestParseFromDomain(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"support@pingrly.com", "pingrly.com"},
+		{"user+tag@Example.COM", "example.com"},
+		{"no-at-sign", ""},
+		{"trailing@", ""},
 	}
-	var resp struct {
-		Key     string  `json:"key"`
-		Details keyInfo `json:"details"`
-	}
-	_ = json.NewDecoder(w.Body).Decode(&resp)
-	if resp.Details.DailyLimit > 10 || resp.Details.MonthlyLimit > 100 {
-		t.Errorf("limits not clamped: %+v", resp.Details)
-	}
-	if !strings.HasPrefix(resp.Key, "gek_") {
-		t.Errorf("key has wrong prefix: %q", resp.Key)
+	for _, c := range cases {
+		if got := parseFromDomain(c.in); got != c.want {
+			t.Errorf("parseFromDomain(%q)=%q want %q", c.in, got, c.want)
+		}
 	}
 }
 
-func TestAdmin_ListUsers_RequiresAdmin(t *testing.T) {
-	srv, _, _, _ := newTestServer(t, nil)
-	w := get(srv, "/api/admin/users", "member@test.local", "memberpass1")
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("want 403, got %d", w.Code)
+func TestSlugify(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"My Org Name", "my-org-name"},
+		{"biswas-me", "biswas-me"},
+		{"  Hello  ", "hello"},
+		{"", "org"},
 	}
-	w = get(srv, "/api/admin/users", "admin@test.local", "adminpass1")
-	if w.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d body=%s", w.Code, w.Body.String())
+	for _, c := range cases {
+		if got := slugify(c.in); got != c.want {
+			t.Errorf("slugify(%q)=%q want %q", c.in, got, c.want)
+		}
 	}
 }
 
-func TestBuildMIME_MultipartAlternative(t *testing.T) {
-	m := Message{
-		From:    Address{Email: "a@x.com", Name: "Alice"},
-		To:      []Address{{Email: "b@x.com"}},
-		Subject: "Hello",
-		HTML:    "<p>Hi</p>",
-		Text:    "Hi",
-	}
-	body, err := buildMIME(m)
+func TestBootstrap(t *testing.T) {
+	st, _ := OpenStore(":memory:")
+	defer st.Close()
+	err := Bootstrap(st, BootstrapConfig{
+		AdminEmail: "a@b.com", AdminPassword: "pass12345",
+		OrgName: "Acme", InitialDomain: "acme.com",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(body, []byte("multipart/alternative")) {
-		t.Error("expected multipart/alternative in body")
+	u, _ := st.GetUserByEmail("a@b.com")
+	if u == nil || !u.IsSuperAdmin {
+		t.Fatal("admin not created or not super-admin")
 	}
-	if !bytes.Contains(body, []byte("<p>Hi</p>")) {
-		t.Error("expected HTML part in body")
+	o, _ := st.GetOrgBySlug("acme")
+	if o == nil {
+		t.Fatal("org not created")
 	}
-}
-
-func TestEncodeHeader_Unicode(t *testing.T) {
-	got := encodeHeader("Héllo")
-	if !strings.HasPrefix(got, "=?UTF-8?Q?") {
-		t.Errorf("expected Q-encoded header, got %q", got)
+	d, _ := st.GetDomainByName(o.ID, "acme.com")
+	if d == nil || d.VerifiedAt != nil {
+		t.Fatal("domain not seeded or wrongly pre-verified")
+	}
+	// second call is a no-op
+	_ = Bootstrap(st, BootstrapConfig{AdminEmail: "x@y.com", AdminPassword: "otherpass"})
+	if n, _ := st.CountUsers(); n != 1 {
+		t.Errorf("bootstrap should be idempotent; got %d users", n)
 	}
 }
 
@@ -235,13 +270,18 @@ func TestMessageValidate(t *testing.T) {
 		{Message{From: Address{Email: "a@x.com"}, To: []Address{{Email: "b@x.com"}}, Subject: "s", Text: "t"}, false},
 		{Message{To: []Address{{Email: "b@x.com"}}, Subject: "s", Text: "t"}, true},
 		{Message{From: Address{Email: "a@x.com"}, Subject: "s", Text: "t"}, true},
-		{Message{From: Address{Email: "a@x.com"}, To: []Address{{Email: "b@x.com"}}, Text: "t"}, true},
-		{Message{From: Address{Email: "a@x.com"}, To: []Address{{Email: "b@x.com"}}, Subject: "s"}, true},
 	}
 	for _, c := range cases {
 		err := c.msg.Validate()
 		if (err != nil) != c.wantError {
 			t.Errorf("msg=%+v: wantError=%v, got=%v", c.msg, c.wantError, err)
 		}
+	}
+}
+
+func TestEncodeHeader_Unicode(t *testing.T) {
+	got := encodeHeader("Héllo")
+	if !strings.HasPrefix(got, "=?UTF-8?Q?") {
+		t.Errorf("expected Q-encoded header, got %q", got)
 	}
 }

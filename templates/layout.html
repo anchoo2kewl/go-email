@@ -11,8 +11,8 @@
   <a class="brand" href="/">go-email</a>
   <nav>
     {{if .User}}
-      <a href="/dashboard">Dashboard</a>
-      {{if eq .User.Role "admin"}}<a href="/admin">Admin</a>{{end}}
+      <a href="/orgs">Organizations</a>
+      {{if .User.IsSuperAdmin}}<a href="/admin">Admin</a>{{end}}
       <span class="user">{{.User.Email}}</span>
       <form method="POST" action="/logout" style="display:inline"><button class="linklike" type="submit">Log out</button></form>
     {{else}}
@@ -20,6 +20,16 @@
     {{end}}
   </nav>
 </header>
+{{if .Org}}
+<nav class="org-bar">
+  <strong>{{.Org.Name}}</strong>
+  <span class="muted">({{.Role}})</span>
+  <a href="/orgs/{{.Org.Slug}}">Overview</a>
+  <a href="/orgs/{{.Org.Slug}}/keys">API keys</a>
+  <a href="/orgs/{{.Org.Slug}}/domains">Domains</a>
+  <a href="/orgs/{{.Org.Slug}}/members">Members</a>
+</nav>
+{{end}}
 <main class="container">
   {{if .Flash}}<div class="flash {{.Flash.Kind}}">{{.Flash.Message}}</div>{{end}}
   {{template "content" .}}

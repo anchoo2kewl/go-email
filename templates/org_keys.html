@@ -1,0 +1,56 @@
+{{define "content"}}
+<section class="page-head">
+  <div>
+    <h1>API keys</h1>
+    <p class="muted">Org defaults: {{.Org.DefaultDailyLimit}}/day · {{.Org.DefaultMonthlyLimit}}/month</p>
+  </div>
+  <button class="btn btn-primary" type="button" onclick="document.getElementById('new-key-form').showModal()">New API key</button>
+</section>
+
+{{if .NewKey}}
+<div class="flash success">
+  <strong>Copy this key now — it won't be shown again:</strong>
+  <code class="new-key">{{.NewKey}}</code>
+</div>
+{{end}}
+
+<table class="data-table">
+  <thead><tr><th>Label</th><th>Prefix</th><th>Daily</th><th>Monthly</th><th>Today</th><th>Month</th><th>Status</th><th>Last used</th><th></th></tr></thead>
+  <tbody>
+  {{range .Keys}}
+  <tr>
+    <td>{{.Label}}</td>
+    <td><code>{{.KeyPrefix}}…</code></td>
+    <td>{{.DailyLimit}}</td>
+    <td>{{.MonthlyLimit}}</td>
+    <td>{{.DailyUsed}}</td>
+    <td>{{.MonthlyUsed}}</td>
+    <td><span class="pill pill-{{.Status}}">{{.Status}}</span></td>
+    <td class="muted">{{.LastUsedDisplay}}</td>
+    <td>
+      {{if eq .Status "active"}}
+      <form method="POST" action="/orgs/{{$.Org.Slug}}/keys/{{.ID}}/revoke" onsubmit="return confirm('Revoke this key?');">
+        <button class="btn btn-ghost btn-sm" type="submit">Revoke</button>
+      </form>
+      {{end}}
+    </td>
+  </tr>
+  {{else}}
+  <tr><td colspan="9" class="empty">No keys yet.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+
+<dialog id="new-key-form" class="modal">
+  <form method="POST" action="/orgs/{{.Org.Slug}}/keys">
+    <h2>New API key</h2>
+    <label><span>Label</span><input type="text" name="label" placeholder="e.g. pingrly-prod" required></label>
+    <label><span>Daily limit</span><input type="number" name="daily_limit" value="{{.Org.DefaultDailyLimit}}" min="1" max="{{.Org.DefaultDailyLimit}}" required></label>
+    <label><span>Monthly limit</span><input type="number" name="monthly_limit" value="{{.Org.DefaultMonthlyLimit}}" min="1" max="{{.Org.DefaultMonthlyLimit}}" required></label>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" onclick="this.closest('dialog').close()">Cancel</button>
+      <button type="submit" class="btn btn-primary">Create key</button>
+    </div>
+  </form>
+</dialog>
+{{end}}
