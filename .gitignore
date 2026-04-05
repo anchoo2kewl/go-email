@@ -1,5 +1,6 @@
 .env
 .env.local
-emaild
+/emaild
 /bin/
 *.log
+data/
