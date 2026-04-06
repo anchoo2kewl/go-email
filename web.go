@@ -39,6 +39,18 @@ type pageData struct {
 	ChallHost     string // for domain-add page
 	Token         string
 	RecentLog     []SendLog
+
+	// Search / filter state for org_overview
+	SearchQuery    string
+	SearchStatus   string
+	SearchTag      string
+	SearchFromDate string
+	SearchToDate   string
+	SearchKeyID    int64
+	SearchPage     int
+	TotalResults   int
+	HasNextPage    bool
+	HasPrevPage    bool
 }
 
 type flashMessage struct {
@@ -96,12 +108,31 @@ type serviceKeyRow struct {
 	LastUsedDisplay string
 }
 
+// templateFuncs are shared helper functions available in all page templates.
+var templateFuncs = template.FuncMap{
+	"splitComma": func(s string) []string {
+		if s == "" {
+			return nil
+		}
+		parts := strings.Split(s, ",")
+		out := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if p = strings.TrimSpace(p); p != "" {
+				out = append(out, p)
+			}
+		}
+		return out
+	},
+	"inc": func(n int) int { return n + 1 },
+	"dec": func(n int) int { return n - 1 },
+}
+
 func (s *Server) initTemplates() error {
 	pages := []string{"landing", "login", "orgs", "org_overview", "org_keys", "org_domains", "org_members", "admin"}
 	for _, name := range pages {
 		// Each page gets its own independent template set so {{define "content"}}
 		// blocks don't overwrite each other across pages.
-		t, err := template.New(name).ParseFS(templateFS, "templates/layout.html", "templates/"+name+".html")
+		t, err := template.New(name).Funcs(templateFuncs).ParseFS(templateFS, "templates/layout.html", "templates/"+name+".html")
 		if err != nil {
 			return err
 		}
@@ -287,9 +318,58 @@ func (s *Server) handleOrgOverview(w http.ResponseWriter, r *http.Request) {
 	u := userFromCtx(r)
 	org := orgFromCtx(r)
 	role := roleFromCtx(r)
-	recent, _ := s.store.ListRecentSendsForOrg(org.ID, 20)
+
+	const pageSize = 20
+
+	q := r.URL.Query()
+	searchQuery := q.Get("q")
+	searchStatus := q.Get("status")
+	searchTag := q.Get("tag")
+	searchFromDate := q.Get("from_date")
+	searchToDate := q.Get("to_date")
+	keyIDStr := q.Get("key_id")
+	pageStr := q.Get("page")
+
+	page, _ := strconv.Atoi(pageStr)
+	if page < 1 {
+		page = 1
+	}
+	keyID, _ := strconv.ParseInt(keyIDStr, 10, 64)
+
+	opts := SearchOpts{
+		Query:    searchQuery,
+		Status:   searchStatus,
+		Tag:      searchTag,
+		APIKeyID: keyID,
+		Limit:    pageSize,
+		Offset:   (page - 1) * pageSize,
+	}
+
+	if searchFromDate != "" {
+		if t, err := time.ParseInLocation("2006-01-02", searchFromDate, time.UTC); err == nil {
+			opts.FromDate = t
+		}
+	}
+	if searchToDate != "" {
+		if t, err := time.ParseInLocation("2006-01-02", searchToDate, time.UTC); err == nil {
+			opts.ToDate = t.AddDate(0, 0, 1) // include full end day
+		}
+	}
+
+	results, total, _ := s.store.SearchSendsForOrg(org.ID, opts)
+
 	s.renderPage(w, "org_overview", pageData{
-		Title: org.Name, User: u, Org: org, Role: role, RecentLog: recent,
+		Title: org.Name, User: u, Org: org, Role: role, RecentLog: results,
+		SearchQuery:    searchQuery,
+		SearchStatus:   searchStatus,
+		SearchTag:      searchTag,
+		SearchFromDate: searchFromDate,
+		SearchToDate:   searchToDate,
+		SearchKeyID:    keyID,
+		SearchPage:     page,
+		TotalResults:   total,
+		HasNextPage:    opts.Offset+pageSize < total,
+		HasPrevPage:    page > 1,
 	})
 }
 

@@ -150,16 +150,38 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Merge tags from JSON body and X-GoEmail-Tags header
+	tagSet := make(map[string]struct{})
+	for _, t := range msg.Tags {
+		if t = strings.TrimSpace(t); t != "" {
+			tagSet[t] = struct{}{}
+		}
+	}
+	if hdrTags := r.Header.Get("X-GoEmail-Tags"); hdrTags != "" {
+		for _, t := range strings.Split(hdrTags, ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				tagSet[t] = struct{}{}
+			}
+		}
+	}
+	tagParts := make([]string, 0, len(tagSet))
+	for t := range tagSet {
+		tagParts = append(tagParts, t)
+	}
+	tagsStr := strings.Join(tagParts, ",")
+
 	// Relay + log
 	sendErr := s.sender.Send(msg)
 	logEntry := &SendLog{
-		APIKeyID:  key.ID,
-		OrgID:     key.OrgID,
-		FromEmail: msg.From.Email,
-		ToEmail:   msg.To[0].Email,
-		Subject:   truncate(msg.Subject, 200),
-		Status:    "sent",
-		SentAt:    time.Now(),
+		APIKeyID:    key.ID,
+		OrgID:       key.OrgID,
+		FromEmail:   msg.From.Email,
+		ToEmail:     msg.To[0].Email,
+		Subject:     truncate(msg.Subject, 200),
+		Status:      "sent",
+		SentAt:      time.Now(),
+		Tags:        tagsStr,
+		APIKeyLabel: key.Label,
 	}
 	if sendErr != nil {
 		logEntry.Status = "failed"

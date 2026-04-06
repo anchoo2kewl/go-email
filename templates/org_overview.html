@@ -2,12 +2,50 @@
 <section class="page-head">
   <div>
     <h1>{{.Org.Name}}</h1>
-    <p class="muted">Recent email activity for this organization.</p>
+    <p class="muted">Email activity for this organization.</p>
   </div>
 </section>
 
+<form method="get" class="search-bar" style="margin-bottom:1rem;display:flex;flex-wrap:wrap;gap:.5rem;align-items:flex-end;">
+  <div style="display:flex;flex-direction:column;gap:.25rem;">
+    <label style="font-size:.8rem;color:var(--sa-muted);">Search</label>
+    <input type="text" name="q" value="{{.SearchQuery}}" placeholder="subject, from, to…" style="min-width:200px;">
+  </div>
+  <div style="display:flex;flex-direction:column;gap:.25rem;">
+    <label style="font-size:.8rem;color:var(--sa-muted);">Status</label>
+    <select name="status">
+      <option value="" {{if eq .SearchStatus ""}}selected{{end}}>All</option>
+      <option value="sent" {{if eq .SearchStatus "sent"}}selected{{end}}>Sent</option>
+      <option value="failed" {{if eq .SearchStatus "failed"}}selected{{end}}>Failed</option>
+    </select>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:.25rem;">
+    <label style="font-size:.8rem;color:var(--sa-muted);">Tag</label>
+    <select name="tag">
+      <option value="" {{if eq .SearchTag ""}}selected{{end}}>All</option>
+      <option value="test" {{if eq .SearchTag "test"}}selected{{end}}>test</option>
+      <option value="weekly-report" {{if eq .SearchTag "weekly-report"}}selected{{end}}>weekly-report</option>
+      <option value="custom" {{if eq .SearchTag "custom"}}selected{{end}}>custom</option>
+    </select>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:.25rem;">
+    <label style="font-size:.8rem;color:var(--sa-muted);">From date</label>
+    <input type="date" name="from_date" value="{{.SearchFromDate}}">
+  </div>
+  <div style="display:flex;flex-direction:column;gap:.25rem;">
+    <label style="font-size:.8rem;color:var(--sa-muted);">To date</label>
+    <input type="date" name="to_date" value="{{.SearchToDate}}">
+  </div>
+  <button type="submit" class="btn btn-primary">Search</button>
+  {{if or .SearchQuery .SearchStatus .SearchTag .SearchFromDate .SearchToDate}}
+  <a href="?" class="btn">Clear</a>
+  {{end}}
+</form>
+
+<p class="muted" style="margin-bottom:.5rem;">{{.TotalResults}} result{{if ne .TotalResults 1}}s{{end}}</p>
+
 <table class="data-table">
-  <thead><tr><th>When</th><th>From</th><th>To</th><th>Subject</th><th>Status</th></tr></thead>
+  <thead><tr><th>When</th><th>From</th><th>To</th><th>Subject</th><th>Tags</th><th>Key</th><th>Status</th></tr></thead>
   <tbody>
   {{range .RecentLog}}
   <tr>
@@ -15,11 +53,31 @@
     <td>{{.FromEmail}}</td>
     <td>{{.ToEmail}}</td>
     <td>{{.Subject}}</td>
+    <td>
+      {{if .Tags}}
+        {{range (splitComma .Tags)}}
+        <span class="pill" style="background:var(--sa-accent);color:#fff;font-size:.75rem;padding:.1rem .4rem;border-radius:.25rem;white-space:nowrap;">{{.}}</span>
+        {{end}}
+      {{else}}—{{end}}
+    </td>
+    <td class="muted">{{if .APIKeyLabel}}{{.APIKeyLabel}}{{else}}—{{end}}</td>
     <td><span class="pill pill-{{.Status}}">{{.Status}}</span></td>
   </tr>
   {{else}}
-  <tr><td colspan="5" class="empty">No sends yet. Create an API key and fire off a test.</td></tr>
+  <tr><td colspan="7" class="empty">No sends found. Try adjusting your search filters.</td></tr>
   {{end}}
   </tbody>
 </table>
+
+{{if or .HasPrevPage .HasNextPage}}
+<div style="display:flex;gap:.5rem;margin-top:1rem;align-items:center;">
+  {{if .HasPrevPage}}
+  <a href="?q={{.SearchQuery}}&status={{.SearchStatus}}&tag={{.SearchTag}}&from_date={{.SearchFromDate}}&to_date={{.SearchToDate}}&key_id={{.SearchKeyID}}&page={{dec .SearchPage}}" class="btn">← Previous</a>
+  {{end}}
+  <span class="muted">Page {{.SearchPage}}</span>
+  {{if .HasNextPage}}
+  <a href="?q={{.SearchQuery}}&status={{.SearchStatus}}&tag={{.SearchTag}}&from_date={{.SearchFromDate}}&to_date={{.SearchToDate}}&key_id={{.SearchKeyID}}&page={{inc .SearchPage}}" class="btn">Next →</a>
+  {{end}}
+</div>
+{{end}}
 {{end}}

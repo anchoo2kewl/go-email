@@ -19,6 +19,7 @@ type Message struct {
 	HTML    string    `json:"html,omitempty"`
 	Text    string    `json:"text,omitempty"`
 	ReplyTo *Address  `json:"reply_to,omitempty"`
+	Tags    []string  `json:"tags,omitempty"`
 }
 
 // Address is an RFC 5322 email address with an optional display name.

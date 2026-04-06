@@ -88,15 +88,29 @@ type APIKey struct {
 
 // SendLog is one row per attempted send.
 type SendLog struct {
-	ID        int64
-	APIKeyID  int64
-	OrgID     int64
-	FromEmail string
-	ToEmail   string
-	Subject   string
-	Status    string // sent | failed
-	Error     string
-	SentAt    time.Time
+	ID          int64
+	APIKeyID    int64
+	OrgID       int64
+	FromEmail   string
+	ToEmail     string
+	Subject     string
+	Status      string // sent | failed
+	Error       string
+	SentAt      time.Time
+	Tags        string
+	APIKeyLabel string
+}
+
+// SearchOpts controls filtering and pagination for SearchSendsForOrg.
+type SearchOpts struct {
+	Query     string    // LIKE search across subject, from_email, to_email
+	Status    string    // "sent" | "failed" | "" (all)
+	Tag       string    // filter where tags LIKE %tag%
+	FromDate  time.Time // zero value = no lower bound
+	ToDate    time.Time // zero value = no upper bound
+	APIKeyID  int64     // 0 = all keys
+	Limit     int       // 0 defaults to 50
+	Offset    int
 }
 
 // ServiceAPIKey is a platform-level credential for automating org/domain/key
@@ -175,6 +189,7 @@ type Store interface {
 	CountSendsSince(apiKeyID int64, since time.Time) (int, error)
 	ListRecentSendsForKey(apiKeyID int64, limit int) ([]SendLog, error)
 	ListRecentSendsForOrg(orgID int64, limit int) ([]SendLog, error)
+	SearchSendsForOrg(orgID int64, opts SearchOpts) ([]SendLog, int, error)
 
 	// Service API keys (super-admin scoped)
 	CreateServiceAPIKey(k *ServiceAPIKey) error
@@ -277,7 +292,9 @@ func (s *sqliteStore) migrate() error {
 			subject TEXT NOT NULL,
 			status TEXT NOT NULL,
 			error TEXT NOT NULL DEFAULT '',
-			sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+			sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			tags TEXT NOT NULL DEFAULT '',
+			api_key_label TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_send_log_key_time ON send_log(api_key_id, sent_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_send_log_org_time ON send_log(org_id, sent_at)`,
@@ -686,9 +703,9 @@ func (s *sqliteStore) TouchAPIKey(id int64, t time.Time) error {
 
 func (s *sqliteStore) RecordSend(log *SendLog) error {
 	res, err := s.db.Exec(
-		`INSERT INTO send_log (api_key_id, org_id, from_email, to_email, subject, status, error, sent_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		log.APIKeyID, log.OrgID, log.FromEmail, log.ToEmail, log.Subject, log.Status, log.Error, log.SentAt,
+		`INSERT INTO send_log (api_key_id, org_id, from_email, to_email, subject, status, error, sent_at, tags, api_key_label)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		log.APIKeyID, log.OrgID, log.FromEmail, log.ToEmail, log.Subject, log.Status, log.Error, log.SentAt, log.Tags, log.APIKeyLabel,
 	)
 	if err != nil {
 		return err
@@ -711,7 +728,7 @@ func (s *sqliteStore) ListRecentSendsForKey(apiKeyID int64, limit int) ([]SendLo
 		limit = 50
 	}
 	return s.queryLogs(
-		`SELECT id, api_key_id, org_id, from_email, to_email, subject, status, error, sent_at
+		`SELECT id, api_key_id, org_id, from_email, to_email, subject, status, error, sent_at, tags, api_key_label
 		 FROM send_log WHERE api_key_id=? ORDER BY sent_at DESC LIMIT ?`,
 		apiKeyID, limit,
 	)
@@ -722,7 +739,7 @@ func (s *sqliteStore) ListRecentSendsForOrg(orgID int64, limit int) ([]SendLog, 
 		limit = 50
 	}
 	return s.queryLogs(
-		`SELECT id, api_key_id, org_id, from_email, to_email, subject, status, error, sent_at
+		`SELECT id, api_key_id, org_id, from_email, to_email, subject, status, error, sent_at, tags, api_key_label
 		 FROM send_log WHERE org_id=? ORDER BY sent_at DESC LIMIT ?`,
 		orgID, limit,
 	)
@@ -737,12 +754,69 @@ func (s *sqliteStore) queryLogs(query string, args ...any) ([]SendLog, error) {
 	var out []SendLog
 	for rows.Next() {
 		var l SendLog
-		if err := rows.Scan(&l.ID, &l.APIKeyID, &l.OrgID, &l.FromEmail, &l.ToEmail, &l.Subject, &l.Status, &l.Error, &l.SentAt); err != nil {
+		if err := rows.Scan(&l.ID, &l.APIKeyID, &l.OrgID, &l.FromEmail, &l.ToEmail, &l.Subject, &l.Status, &l.Error, &l.SentAt, &l.Tags, &l.APIKeyLabel); err != nil {
 			return nil, err
 		}
 		out = append(out, l)
 	}
 	return out, rows.Err()
+}
+
+// SearchSendsForOrg queries send_log with optional filters and pagination.
+// Returns (results, totalCount, error).
+func (s *sqliteStore) SearchSendsForOrg(orgID int64, opts SearchOpts) ([]SendLog, int, error) {
+	if opts.Limit <= 0 {
+		opts.Limit = 50
+	}
+
+	// Build WHERE clauses dynamically
+	where := []string{"org_id = ?"}
+	args := []any{orgID}
+
+	if opts.Query != "" {
+		like := "%" + opts.Query + "%"
+		where = append(where, "(subject LIKE ? OR from_email LIKE ? OR to_email LIKE ?)")
+		args = append(args, like, like, like)
+	}
+	if opts.Status != "" {
+		where = append(where, "status = ?")
+		args = append(args, opts.Status)
+	}
+	if opts.Tag != "" {
+		where = append(where, "tags LIKE ?")
+		args = append(args, "%"+opts.Tag+"%")
+	}
+	if !opts.FromDate.IsZero() {
+		where = append(where, "sent_at >= ?")
+		args = append(args, opts.FromDate)
+	}
+	if !opts.ToDate.IsZero() {
+		where = append(where, "sent_at < ?")
+		args = append(args, opts.ToDate)
+	}
+	if opts.APIKeyID != 0 {
+		where = append(where, "api_key_id = ?")
+		args = append(args, opts.APIKeyID)
+	}
+
+	whereClause := strings.Join(where, " AND ")
+
+	// Count query
+	var total int
+	countQuery := "SELECT COUNT(*) FROM send_log WHERE " + whereClause
+	if err := s.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	// Data query
+	dataQuery := `SELECT id, api_key_id, org_id, from_email, to_email, subject, status, error, sent_at, tags, api_key_label
+		 FROM send_log WHERE ` + whereClause + ` ORDER BY sent_at DESC LIMIT ? OFFSET ?`
+	dataArgs := append(args, opts.Limit, opts.Offset)
+	results, err := s.queryLogs(dataQuery, dataArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	return results, total, nil
 }
 
 // --- Service API keys ---
