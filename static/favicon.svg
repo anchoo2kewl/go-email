@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="6" fill="#0b0e14"/>
+  <g transform="translate(4,6)">
+    <!-- envelope body -->
+    <rect x="2" y="5" width="20" height="13" rx="2" fill="#3b82f6"/>
+    <!-- envelope flap (V shape) -->
+    <path d="M2,5 L12,13 L22,5" fill="none" stroke="#1d4ed8" stroke-width="1.5" stroke-linejoin="round"/>
+    <!-- @ symbol hint -->
+    <circle cx="12" cy="3" r="2.5" fill="none" stroke="#f8fafc" stroke-width="1.2"/>
+    <path d="M14.5,3 A1,1 0 1,0 12,4.5" fill="none" stroke="#f8fafc" stroke-width="1"/>
+  </g>
+</svg>
