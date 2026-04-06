@@ -97,10 +97,11 @@ type serviceKeyRow struct {
 }
 
 func (s *Server) initTemplates() error {
-	tmpl := template.New("")
 	pages := []string{"landing", "login", "orgs", "org_overview", "org_keys", "org_domains", "org_members", "admin"}
 	for _, name := range pages {
-		t, err := tmpl.New(name).ParseFS(templateFS, "templates/layout.html", "templates/"+name+".html")
+		// Each page gets its own independent template set so {{define "content"}}
+		// blocks don't overwrite each other across pages.
+		t, err := template.New(name).ParseFS(templateFS, "templates/layout.html", "templates/"+name+".html")
 		if err != nil {
 			return err
 		}
