@@ -321,6 +321,20 @@ func (s *sqliteStore) migrate() error {
 			return fmt.Errorf("migration %q: %w", q, err)
 		}
 	}
+	// Additive column migrations for existing tables (ALTER TABLE is safe to
+	// retry — SQLite returns "duplicate column" which we ignore).
+	alters := []string{
+		`ALTER TABLE send_log ADD COLUMN tags TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE send_log ADD COLUMN api_key_label TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, q := range alters {
+		if _, err := s.db.Exec(q); err != nil {
+			// "duplicate column name" means it already exists — safe to ignore.
+			if !strings.Contains(err.Error(), "duplicate column") {
+				return fmt.Errorf("alter migration: %w", err)
+			}
+		}
+	}
 	return nil
 }
 
