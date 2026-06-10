@@ -23,7 +23,7 @@ biswas.me services.
 
 ```bash
 cd /opt
-sudo git clone https://github.com/biswas-dev/go-email.git
+sudo git clone https://github.com/anchoo2kewl/go-email.git
 cd go-email
 sudo cp .env.example .env
 sudo vi .env   # fill in SMTP_* and ADMIN_PASSWORD
@@ -44,3 +44,23 @@ sudo nginx -t && sudo nginx -s reload
 - Browse to <https://email.biswas.me> — landing page.
 - Log in with `anshuman@biswas.me` + the password set in `ADMIN_PASSWORD`.
 - Create a member, then an API key, then curl `POST /v1/emails`.
+
+## Password recovery
+
+If you ever get locked out of the web UI, reset any user's password directly
+on the host via the `emaild reset-password` subcommand. It creates the user as
+a super-admin if they don't already exist, otherwise it just rewrites the
+bcrypt hash. SMTP env vars are not required for this subcommand.
+
+```bash
+sudo docker compose -f /opt/go-email/docker-compose.yml exec emaild \
+  emaild reset-password anshuman@biswas.me 'new-password-at-least-8-chars'
+```
+
+The container image must be at least the build that includes this subcommand
+(merged 2026-06). After a `git pull` on the host, rebuild and roll the
+container:
+
+```bash
+cd /opt/go-email && git pull && sudo docker compose up -d --build
+```

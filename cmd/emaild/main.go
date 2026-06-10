@@ -21,9 +21,17 @@
 //	BOOTSTRAP_ORG_NAME        default "biswas-me"
 //	BOOTSTRAP_ORG_SLUG        default "biswas-me"
 //	BOOTSTRAP_DOMAIN          default pingrly.com
+//
+// Subcommands:
+//
+//	emaild reset-password <email> <new-password>
+//	    Reset (or create) a user's password directly against DB_PATH.
+//	    Creates the user as super-admin if they don't already exist.
+//	    Only DB_PATH is required; SMTP_* env vars are ignored.
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -35,6 +43,13 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "reset-password" {
+		if err := runResetPassword(os.Args[2:]); err != nil {
+			log.Fatalf("reset-password: %v", err)
+		}
+		return
+	}
+
 	port := envOr("PORT", "8095")
 	dbPath := envOr("DB_PATH", "/data/emaild.db")
 
@@ -126,3 +141,40 @@ type stdLogger struct{}
 
 func (stdLogger) Infof(format string, args ...any)  { log.Printf("info: "+format, args...) }
 func (stdLogger) Errorf(format string, args ...any) { log.Printf("error: "+format, args...) }
+
+func runResetPassword(args []string) error {
+	if len(args) != 2 {
+		return fmt.Errorf("usage: emaild reset-password <email> <new-password>")
+	}
+	email := strings.ToLower(strings.TrimSpace(args[0]))
+	password := args[1]
+	if email == "" {
+		return fmt.Errorf("email is required")
+	}
+	hash, err := goemail.HashPassword(password)
+	if err != nil {
+		return err
+	}
+	dbPath := envOr("DB_PATH", "/data/emaild.db")
+	store, err := goemail.OpenStore(dbPath)
+	if err != nil {
+		return fmt.Errorf("open store at %s: %w", dbPath, err)
+	}
+	defer store.Close()
+
+	u, err := store.GetUserByEmail(email)
+	if err != nil {
+		u = &goemail.User{Email: email, PasswordHash: hash, IsSuperAdmin: true}
+		if err := store.CreateUser(u); err != nil {
+			return fmt.Errorf("create user: %w", err)
+		}
+		log.Printf("created super-admin user %s (id=%d)", email, u.ID)
+		return nil
+	}
+	u.PasswordHash = hash
+	if err := store.UpdateUser(u); err != nil {
+		return fmt.Errorf("update user: %w", err)
+	}
+	log.Printf("reset password for %s (id=%d, super_admin=%v)", email, u.ID, u.IsSuperAdmin)
+	return nil
+}

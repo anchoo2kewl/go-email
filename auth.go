@@ -52,6 +52,9 @@ func hashPassword(password string) (string, error) {
 	return string(h), nil
 }
 
+// HashPassword is the exported form of hashPassword for use by CLI tools.
+func HashPassword(password string) (string, error) { return hashPassword(password) }
+
 // verifyPassword returns nil if password matches the hash.
 func verifyPassword(password, hash string) error {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
