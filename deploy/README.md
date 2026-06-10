@@ -54,8 +54,11 @@ bcrypt hash. SMTP env vars are not required for this subcommand.
 
 ```bash
 sudo docker compose -f /opt/go-email/docker-compose.yml exec emaild \
-  emaild reset-password anshuman@biswas.me 'new-password-at-least-8-chars'
+  ./emaild reset-password anshuman@biswas.me 'new-password-at-least-8-chars'
 ```
+
+(The binary lives at `/app/emaild` inside the image and is not on `$PATH`,
+so it must be invoked as `./emaild` from its working directory.)
 
 The container image must be at least the build that includes this subcommand
 (merged 2026-06). After a `git pull` on the host, rebuild and roll the
